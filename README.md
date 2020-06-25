@@ -1,3 +1,5 @@
+A variation graph-oriented fork of WhatsHap.
+
 [![PyPI](https://img.shields.io/pypi/v/whatshap.svg)](https://pypi.python.org/pypi/whatshap)
 [![Build Status](https://semaphoreci.com/api/v1/whatshap/whatshap/branches/master/shields_badge.svg)](https://semaphoreci.com/whatshap/whatshap)
 [![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg)](http://bioconda.github.io/recipes/whatshap/README.html)
