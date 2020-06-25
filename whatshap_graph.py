@@ -9,7 +9,7 @@ from whatshap.merge import ReadMerger
 
 import sys
 
-def gfa_to_readset(gfa_filename, split_gap=100, w=None, sample_ids=None, source_id=0, scale_quality=None):
+def gfa_to_readset(gfa_filename, split_gap=1000, w=None, sample_ids=None, source_id=0, scale_quality=None):
     rs = ReadSet()
     with open(gfa_filename) as gfa_file:
         for line in gfa_file:
@@ -27,7 +27,7 @@ def gfa_to_readset(gfa_filename, split_gap=100, w=None, sample_ids=None, source_
             i = 0
             # how do we find segments?
             while i < path_length:
-                read = Read("{}.{}".format(path_name, segment_idx), 50, source_id)
+                read = Read("{}\t{}".format(path_name, segment_idx), 50, source_id)
                 segment_idx += 1
                 q = 1
                 # while the distance to the next node is less than our split_gap threshold
@@ -48,36 +48,23 @@ def gfa_to_readset(gfa_filename, split_gap=100, w=None, sample_ids=None, source_
                 #read.sort()  # not sure if needed
                 rs.add(read)
     rs.sort()
-    print(rs)
+    #print(rs)
     return rs
 
 
-print('INPUT READ SET')
+#print('INPUT READ SET')
 readset = gfa_to_readset(sys.argv[1])
 readset = readset.subset(
     [i for i, read in enumerate(readset) if len(read) >= 2]
 )
-#read_merging=False,
-"""
-read_merging_error_rate=0.15,
-read_merging_max_error_rate=0.25,
-read_merging_positive_threshold=1000000,
-read_merging_negative_threshold=1000,
-read_merger = ReadMerger(
-    read_merging_error_rate,
-    read_merging_max_error_rate,
-    read_merging_positive_threshold,
-    read_merging_negative_threshold,
-)
-merged_reads = read_merger.merge(readset)
-"""
-max_coverage = 20
+
+max_coverage = 15
 selected_indices = readselection(readset, max_coverage)
 selected_reads = readset.subset(selected_indices)
 
-print(readset)
+#print(selected_reads)
 
-positions = readset.get_positions()
+positions = selected_reads.get_positions()
 
 # create genotypes over your variants: all heterozygous (=1)
 genotypes = canonic_index_list_to_biallelic_gt_list([1] * len(positions))
@@ -91,13 +78,19 @@ pedigree.add_individual('individual0', genotypes, genotype_likelihoods)
 recombcost = [1] * len(positions) 
 
 # run the core phasing algorithm, creating a DP table
-dp_table = PedigreeDPTable(readset, recombcost, pedigree, distrust_genotypes=False)
+dp_table = PedigreeDPTable(selected_reads, recombcost, pedigree, distrust_genotypes=False)
 phasing, transmission_vector = dp_table.get_super_reads()
-print('PHASING')
-print(phasing[0])
-print('MEC Score:', dp_table.get_optimal_cost())
+#print('PHASING')
+#print(phasing[0])
+#print('MEC Score:', dp_table.get_optimal_cost())
 
 # In case the bi-partition of reads is of interest:
 partition = dp_table.get_optimal_partitioning()
-print(partition)
+#print(partition)
+
+#print(len(partition), len(selected_reads))
+#print(selected_reads.subset(partition))
+#print([i.name for i in selected_reads.subset(partition == 0)])
+for read_index, read in enumerate(selected_reads):
+    print(partition[read_index], read.name)
 
