@@ -92,7 +92,7 @@ readset = readset.subset(
     [i for i, read in enumerate(readset) if len(read) >= 2]
 )
 
-max_coverage = 15
+max_coverage = 17
 selected_indices = readselection(readset, max_coverage)
 selected_reads = readset.subset(selected_indices)
 
@@ -101,36 +101,55 @@ for read in selected_reads: readset_length+=len(read)
 
 #print(selected_reads)
 
-positions = selected_reads.get_positions()
+def bipartition(reads):
+    positions = reads.get_positions()
+    # create genotypes over your variants: all heterozygous (=1)
+    genotypes = canonic_index_list_to_biallelic_gt_list([1] * len(positions))
+    # genotype likelihoods are None
+    genotype_likelihoods = [None] * len(positions)
+    # create empty pedigree
+    pedigree = Pedigree(NumericSampleIds())
+    # add one individual to pedigree
+    pedigree.add_individual('individual0', genotypes, genotype_likelihoods)
+    # recombination cost vector, irrelevant if one using one individual
+    recombcost = [1] * len(positions) 
 
-# create genotypes over your variants: all heterozygous (=1)
-genotypes = canonic_index_list_to_biallelic_gt_list([1] * len(positions))
-# genotype likelihoods are None
-genotype_likelihoods = [None] * len(positions)
-# create empty pedigree
-pedigree = Pedigree(NumericSampleIds())
-# add one individual to pedigree
-pedigree.add_individual('individual0', genotypes, genotype_likelihoods)
-# recombination cost vector, irrelevant if one using one individual
-recombcost = [1] * len(positions) 
+    # run the core phasing algorithm, creating a DP table
+    dp_table = PedigreeDPTable(reads, recombcost, pedigree, distrust_genotypes=False)
+    phasing, transmission_vector = dp_table.get_super_reads()
+    print('PHASING')
+    print(phasing[0])
+    mec_score = dp_table.get_optimal_cost()
+    eprint("MEC Score:", mec_score)
+    eprint("MEC Score / readset length:", float(mec_score) / float(readset_length))
 
-# run the core phasing algorithm, creating a DP table
-dp_table = PedigreeDPTable(selected_reads, recombcost, pedigree, distrust_genotypes=False)
-phasing, transmission_vector = dp_table.get_super_reads()
-print('PHASING')
-print(phasing[0])
-mec_score = dp_table.get_optimal_cost()
-eprint("MEC Score:", mec_score)
-eprint("MEC Score / readset length:", float(mec_score) / float(readset_length))
+    # In case the bi-partition of reads is of interest:
+    partition = dp_table.get_optimal_partitioning()
+    #print(partition)
+    eprint("partition fraction:", sum(partition)/float(len(partition)))
 
-# In case the bi-partition of reads is of interest:
-partition = dp_table.get_optimal_partitioning()
-#print(partition)
-eprint("partition fraction:", sum(partition)/float(len(partition)))
+    return partition
 
+partition = bipartition(selected_reads)
+
+read_partitions = {}
+
+readsets = [ReadSet(), ReadSet()]
+
+for read_index, read in enumerate(selected_reads):
+    read_partitions[read.name] = [partition[read_index]]
+    readsets[partition[read_index]].add(read)
+    #print(partition[read_index], read.name)
+
+partitions = [bipartition(readsets[0]), bipartition(readsets[1])]
+
+for i in range(0,2):
+    for read_index, read in enumerate(readsets[i]):
+        read_partitions[read.name].append(partitions[i][read_index])
+
+for read_index, read in enumerate(selected_reads):
+    print(" ".join(map(str, read_partitions[read.name])), read.name)
 #print(len(partition), len(selected_reads))
 #print(selected_reads.subset(partition))
 #print([i.name for i in selected_reads.subset(partition == 0)])
-for read_index, read in enumerate(selected_reads):
-    print(partition[read_index], read.name)
 
