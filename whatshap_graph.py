@@ -8,9 +8,30 @@ from whatshap.core import Read, ReadSet, readselection, Genotype
 from whatshap.merge import ReadMerger
 
 import sys
+import math
 
-def gfa_to_readset(gfa_filename, split_gap=1000, w=None, sample_ids=None, source_id=0, scale_quality=None):
+def gfa_to_readset(gfa_filename, split_gap=100, w=None, sample_ids=None, source_id=0, scale_quality=None):
     rs = ReadSet()
+    node_length = {}
+    node_coverage = {}
+    with open(gfa_filename) as gfa_file:
+        for line in gfa_file:
+            fields = line.strip().split("\t")
+            if fields[0] != "S":
+                continue
+            node_length[int(fields[1])] = len(fields[2])
+    with open(gfa_filename) as gfa_file:
+        for line in gfa_file:
+            fields = line.strip().split("\t")
+            if fields[0] != "P":
+                continue
+            path_name = fields[1]
+            path_str = fields[2]
+            for i in [int(s[:-1]) for s in path_str.split(",")]:
+                if i in node_coverage:
+                    node_coverage[i] += 1
+                else:
+                    node_coverage[i] = 1
     with open(gfa_filename) as gfa_file:
         for line in gfa_file:
             fields = line.strip().split("\t")
@@ -26,34 +47,47 @@ def gfa_to_readset(gfa_filename, split_gap=1000, w=None, sample_ids=None, source
             segment_idx = 0
             i = 0
             # how do we find segments?
+            longest_read = None
             while i < path_length:
                 read = Read("{}\t{}".format(path_name, segment_idx), 50, source_id)
+                #read = Read("{}".format(path_name), 50, source_id)
                 segment_idx += 1
                 q = 1
                 # while the distance to the next node is less than our split_gap threshold
                 curr = path[i]
-                read.add_variant(position=(curr * 10), allele=1, quality=q)
+                read.add_variant(position=curr, allele=1, quality=-10*math.log10(1-1.0/node_coverage[curr]+0.001))
                 last = curr
                 i += 1
                 while i < path_length:
                     curr = path[i]
-                    if curr - last > split_gap:
+                    dist = 0
+                    for node_id in range(last+1, curr):
+                        dist += node_length[node_id]
+                    #eprint("for", path_name, "dist is", dist)
+                    if dist > split_gap:
                         break
                     else:
                         for node_id in range(last+1, curr):
-                            read.add_variant(position=(node_id * 10), allele=0, quality=q)
-                        read.add_variant(position=(curr * 10), allele=1, quality=q)
+                            #eprint(node_coverage[node_id])
+                            read.add_variant(position=node_id, allele=0, quality=1) #-10*math.log10(1-1.0/node_coverage[node_id]+0.001))
+                        read.add_variant(position=curr, allele=1, quality=-10*math.log10(1-1.0/node_coverage[curr]+0.001))
                         i += 1
                         last = curr
                 #read.sort()  # not sure if needed
-                rs.add(read)
+                #if len(read) > min_read_length:
+                if longest_read is None or len(read) > len(longest_read):
+                    longest_read = read
+                #rs.add(read)
+            rs.add(longest_read)
     rs.sort()
     #print(rs)
     return rs
 
+def eprint(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
 
 #print('INPUT READ SET')
-readset = gfa_to_readset(sys.argv[1])
+readset = gfa_to_readset(sys.argv[1], int(sys.argv[2]))
 readset = readset.subset(
     [i for i, read in enumerate(readset) if len(read) >= 2]
 )
@@ -61,6 +95,9 @@ readset = readset.subset(
 max_coverage = 15
 selected_indices = readselection(readset, max_coverage)
 selected_reads = readset.subset(selected_indices)
+
+readset_length = 0
+for read in selected_reads: readset_length+=len(read)
 
 #print(selected_reads)
 
@@ -80,13 +117,16 @@ recombcost = [1] * len(positions)
 # run the core phasing algorithm, creating a DP table
 dp_table = PedigreeDPTable(selected_reads, recombcost, pedigree, distrust_genotypes=False)
 phasing, transmission_vector = dp_table.get_super_reads()
-#print('PHASING')
-#print(phasing[0])
-#print('MEC Score:', dp_table.get_optimal_cost())
+print('PHASING')
+print(phasing[0])
+mec_score = dp_table.get_optimal_cost()
+eprint("MEC Score:", mec_score)
+eprint("MEC Score / readset length:", float(mec_score) / float(readset_length))
 
 # In case the bi-partition of reads is of interest:
 partition = dp_table.get_optimal_partitioning()
 #print(partition)
+eprint("partition fraction:", sum(partition)/float(len(partition)))
 
 #print(len(partition), len(selected_reads))
 #print(selected_reads.subset(partition))
