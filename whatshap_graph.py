@@ -49,8 +49,8 @@ def gfa_to_readset(gfa_filename, split_gap=100, w=None, sample_ids=None, source_
             # how do we find segments?
             longest_read = None
             while i < path_length:
-                read = Read("{}\t{}".format(path_name, segment_idx), 50, source_id)
-                #read = Read("{}".format(path_name), 50, source_id)
+                #read = Read("{}\t{}".format(path_name, segment_idx), 50, source_id)
+                read = Read("{}".format(path_name), 50, source_id)
                 segment_idx += 1
                 q = 1
                 # while the distance to the next node is less than our split_gap threshold
@@ -83,16 +83,31 @@ def gfa_to_readset(gfa_filename, split_gap=100, w=None, sample_ids=None, source_
     #print(rs)
     return rs
 
+def gfa_node_sequences(gfa_filename):
+    seqs = {}
+    with open(gfa_filename) as gfa_file:
+        for line in gfa_file:
+            fields = line.strip().split("\t")
+            if fields[0] != "S":
+                continue
+            seqs[int(fields[1])] = fields[2]
+    return seqs
+    
+
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
 
 #print('INPUT READ SET')
-readset = gfa_to_readset(sys.argv[1], int(sys.argv[2]))
+
+gfa_filename = sys.argv[1]
+max_gap = int(sys.argv[2])
+max_coverage = int(sys.argv[3])
+
+readset = gfa_to_readset(gfa_filename, max_gap)
 readset = readset.subset(
     [i for i, read in enumerate(readset) if len(read) >= 2]
 )
 
-max_coverage = 17
 selected_indices = readselection(readset, max_coverage)
 selected_reads = readset.subset(selected_indices)
 
@@ -117,8 +132,10 @@ def bipartition(reads):
     # run the core phasing algorithm, creating a DP table
     dp_table = PedigreeDPTable(reads, recombcost, pedigree, distrust_genotypes=False)
     phasing, transmission_vector = dp_table.get_super_reads()
-    print('PHASING')
-    print(phasing[0])
+    #print('PHASING')
+    #print(phasing[0])
+    #print(phasing[0][0])
+    #print(phasing[0][1])
     mec_score = dp_table.get_optimal_cost()
     eprint("MEC Score:", mec_score)
     eprint("MEC Score / readset length:", float(mec_score) / float(readset_length))
@@ -128,27 +145,22 @@ def bipartition(reads):
     #print(partition)
     eprint("partition fraction:", sum(partition)/float(len(partition)))
 
-    return partition
+    return phasing, partition
 
-partition = bipartition(selected_reads)
+phasing, partition = bipartition(selected_reads)
 
-read_partitions = {}
+node_sequence = gfa_node_sequences(gfa_filename)
 
-readsets = [ReadSet(), ReadSet()]
-
-for read_index, read in enumerate(selected_reads):
-    read_partitions[read.name] = [partition[read_index]]
-    readsets[partition[read_index]].add(read)
-    #print(partition[read_index], read.name)
-
-partitions = [bipartition(readsets[0]), bipartition(readsets[1])]
-
-for i in range(0,2):
-    for read_index, read in enumerate(readsets[i]):
-        read_partitions[read.name].append(partitions[i][read_index])
+for index, superread in enumerate(phasing[0]):
+    seq = ""
+    for variant in superread:
+        if variant.allele == 1 or variant.allele == 3:
+            seq += node_sequence[variant.position]
+    print(">phase{}".format(index))
+    print(seq)
 
 for read_index, read in enumerate(selected_reads):
-    print(" ".join(map(str, read_partitions[read.name])), read.name)
+    print(partition[read_index], read.name)
 #print(len(partition), len(selected_reads))
 #print(selected_reads.subset(partition))
 #print([i.name for i in selected_reads.subset(partition == 0)])
